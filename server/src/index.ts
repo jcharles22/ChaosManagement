@@ -4,6 +4,8 @@ import { Room } from './Room.js';
 import type { ClientMessage } from './types.js';
 
 const PORT = Number(process.env.PORT) || 3001;
+const TICK_HZ = Number(process.env.TICK_HZ) || 20;
+const TICK_MS = Math.round(1000 / TICK_HZ);
 const rooms = new Map<string, Room>();
 
 const server = http.createServer((_req, res) => {
@@ -14,7 +16,14 @@ const server = http.createServer((_req, res) => {
   res.end('Chaos Management game server — connect via WebSocket at /ws');
 });
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: {
+    zlibDeflateOptions: { level: 3 },
+    threshold: 128,
+  },
+});
 
 function generateCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -120,9 +129,9 @@ wss.on('connection', (ws) => {
 });
 
 setInterval(() => {
-  for (const room of rooms.values()) room.tick(1 / 30);
-}, 33);
+  for (const room of rooms.values()) room.tick(1 / TICK_HZ);
+}, TICK_MS);
 
 server.listen(PORT, () => {
-  console.log(`Chaos Management server listening on port ${PORT}`);
+  console.log(`Chaos Management server listening on port ${PORT} (${TICK_HZ}Hz tick)`);
 });

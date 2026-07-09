@@ -12,6 +12,7 @@ export class StorageContainer {
   private bodyGfx: Phaser.GameObjects.Rectangle;
   private highlight: Phaser.GameObjects.Rectangle;
   private actionText: Phaser.GameObjects.Text;
+  private networkCount = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, capacity: number) {
     this.x = x;
@@ -60,11 +61,15 @@ export class StorageContainer {
   }
 
   get isFull(): boolean {
-    return this.items.length >= this.capacity;
+    return this.displayCount >= this.capacity;
+  }
+
+  get displayCount(): number {
+    return this.items.length > 0 ? this.items.length : this.networkCount;
   }
 
   get freeSlots(): number {
-    return Math.max(0, this.capacity - this.items.length);
+    return Math.max(0, this.capacity - this.displayCount);
   }
 
   canAccept(_type?: ItemType): boolean {
@@ -155,10 +160,27 @@ export class StorageContainer {
     );
   }
 
+  /** Position a networked item inside the storage grid (multiplayer). */
+  layoutNetworkItem(item: ItemEntity, index: number): void {
+    const cols = 4;
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    item.onBelt = false;
+    item.carried = false;
+    item.setPosition(this.x - 24 + col * 16, this.y - 8 + row * 14);
+    item.sprite.setVisible(true);
+    item.sprite.setDepth(13);
+    item.sprite.setScale(0.7);
+  }
+
   setNetworkCount(count: number, capacity: number): void {
+    this.networkCount = count;
     this.capacity = capacity;
     this.labelText.setText(`${count}/${capacity}`);
     this.bodyGfx.setFillStyle(count >= capacity ? 0x664444 : 0x3a4558);
+    this.actionText.setText(
+      count > 0 ? 'E: TAKE item' : count >= capacity ? 'FULL — clear it!' : 'belt dumps here',
+    );
   }
 
   containsPoint(x: number, y: number, radius = 50): boolean {

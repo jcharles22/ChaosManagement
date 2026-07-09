@@ -39,7 +39,12 @@ export interface BreachState {
   size: number;
 }
 
-export interface MachineState {
+export interface MachineItemNet {
+  id: string;
+  type: ItemType;
+}
+
+interface MachineSimState {
   id: MachineId;
   broken: boolean;
   crafting: boolean;
@@ -48,6 +53,17 @@ export interface MachineState {
   powered: boolean;
   inputItems: string[];
   outputItems: string[];
+}
+
+export interface MachineNetState {
+  id: MachineId;
+  broken: boolean;
+  crafting: boolean;
+  progress: number;
+  repairProgress: number;
+  powered: boolean;
+  inputItems: MachineItemNet[];
+  outputItems: MachineItemNet[];
 }
 
 export interface BeltState {
@@ -75,11 +91,12 @@ export interface WorldSnapshot {
   players: PlayerNetState[];
   belts: BeltState[];
   storage: { capacity: number; items: { id: string; type: ItemType }[] };
-  machines: MachineState[];
+  machines: MachineNetState[];
   breaches: BreachState[];
   floorItems: { id: string; type: ItemType; x: number; y: number }[];
   asteroids: { ship: ShipState; bodies: SimBody[] };
   gameOver?: { reason: string; score: number; wave: number; survivedMs: number };
+  events?: string[];
 }
 
 interface RoomPlayer {
@@ -106,7 +123,7 @@ export class GameWorld {
   private players = new Map<string, RoomPlayer>();
   private items = new Map<string, GameItem>();
   private breaches: BreachState[] = [];
-  private machines: MachineState[] = [];
+  private machines: MachineSimState[] = [];
   private beltItems = new Map<string, string[]>();
   private beltBlocked = new Map<string, boolean>();
   private storageItems: string[] = [];
@@ -148,6 +165,8 @@ export class GameWorld {
       onWaveAdvanced: (wave) => {
         this.state.score += wave * 25;
         this.events.push(`Wave ${wave} — bridge is escalating`);
+        if (wave === 5) this.events.push('Shift milestone: still employed!');
+        if (wave === 8) this.events.push('Heroic overtime. Captain still yelling.');
       },
     });
   }
@@ -180,13 +199,16 @@ export class GameWorld {
       const item = this.items.get(itemId);
       if (item) {
         item.carriedBy = null;
-        item.x = p.x;
-        item.y = p.y;
+        item.x = p.x + 24;
+        item.y = p.y + 24;
       }
     }
+    p.carried = [];
     this.players.delete(id);
-    this.started = false;
-    for (const pl of this.players.values()) pl.ready = false;
+  }
+
+  getPlayerRole(id: string): CrewRole | undefined {
+    return this.players.get(id)?.role;
   }
 
   setReady(id: string): void {
@@ -271,8 +293,9 @@ export class GameWorld {
     this.updateBreaches(dt);
     this.checkFuelStarve(dt);
 
-    if (this.storageItems.length > this.state.storageCapacity) {
-      this.storageItems = this.storageItems.slice(0, this.state.storageCapacity);
+    while (this.storageItems.length > this.state.storageCapacity) {
+      const id = this.storageItems.pop()!;
+      this.items.delete(id);
     }
     this.beltBlocked.set('incoming', this.storageItems.length >= this.state.storageCapacity);
   }
@@ -305,7 +328,16 @@ export class GameWorld {
         capacity: this.state.storageCapacity,
         items: this.storageItems.map((id) => ({ id, type: this.items.get(id)!.type })),
       },
-      machines: this.machines.map((m) => ({ ...m, inputItems: [...m.inputItems], outputItems: [...m.outputItems] })),
+      machines: this.machines.map((m) => ({
+        id: m.id,
+        broken: m.broken,
+        crafting: m.crafting,
+        progress: m.progress,
+        repairProgress: m.repairProgress,
+        powered: m.powered,
+        inputItems: m.inputItems.map((id) => ({ id, type: this.items.get(id)!.type })),
+        outputItems: m.outputItems.map((id) => ({ id, type: this.items.get(id)!.type })),
+      })),
       breaches: this.breaches.map((b) => ({ ...b })),
       floorItems: [...this.items.values()]
         .filter((i) => !i.onBelt && !i.carriedBy && !this.isInStorage(i.id) && !this.isInMachine(i.id))
@@ -313,11 +345,13 @@ export class GameWorld {
       asteroids: {
         ship: { ...this.sim.ship },
         bodies:
-          this.tick % 2 === 0
+          this.tick % 3 === 0
             ? this.sim.bodies.map((b) => ({ ...b }))
             : [],
       },
     };
+
+    if (this.events.length > 0) snap.events = [...this.events];
 
     if (!this.state.alive) {
       snap.gameOver = {
@@ -390,6 +424,11 @@ export class GameWorld {
         this.dropCarried(p);
         this.upgrades.install(effect);
         this.events.push(`Installed: ${this.upgrades.labelFor(effect)}`);
+        this.events.push('Upgrade installed!');
+      } else if (carried?.type === 'upgrade_module') {
+        this.events.push('Upgrade bay full!');
+      } else {
+        this.events.push('Bring an upgrade module here');
       }
       return;
     }
@@ -400,11 +439,13 @@ export class GameWorld {
       if (item.type === 'heavy_shell' && this.nearBelt('shells', p.x, p.y, 55)) {
         this.dropCarried(p);
         this.addToBelt('shells', item.id, 0);
+        this.events.push('Shell loaded → cannon');
         return;
       }
       if (item.type === 'ammo_box' && this.nearBelt('ammo', p.x, p.y, 55)) {
         this.dropCarried(p);
         this.addToBelt('ammo', item.id, 0);
+        this.events.push('Ammo loaded → MG');
         return;
       }
       this.dropCarried(p);
@@ -427,6 +468,7 @@ export class GameWorld {
         m.inputItems.push(item.id);
         item.x = inX;
         item.y = inY;
+        this.events.push(`Dropped into ${m.id.replace(/_/g, ' ')}`);
         return true;
       }
     }
@@ -491,7 +533,7 @@ export class GameWorld {
     }
   }
 
-  private updateMachine(m: MachineState, dt: number): void {
+  private updateMachine(m: MachineSimState, dt: number): void {
     const recipe = MACHINE_RECIPES[m.id];
     if (m.broken) return;
 
@@ -597,6 +639,7 @@ export class GameWorld {
   private onShipHit(damage: number, shielded: boolean): void {
     const actual = shielded ? damage * 0.35 : damage;
     this.state.integrity = Math.max(0, this.state.integrity - actual);
+    this.events.push('__ship_hit__');
     if (!shielded || Math.random() < 0.45) this.spawnBreach();
     if (Math.random() < (shielded ? 0.25 : 0.55)) this.breakRandomMachine();
     if (this.state.integrity <= 0) this.triggerGameOver('Hull integrity critical. Abandon ship!');
@@ -708,7 +751,7 @@ export class GameWorld {
     });
   }
 
-  private canAcceptInput(m: MachineState, type: ItemType): boolean {
+  private canAcceptInput(m: MachineSimState, type: ItemType): boolean {
     const recipe = MACHINE_RECIPES[m.id];
     return recipe.input === type;
   }

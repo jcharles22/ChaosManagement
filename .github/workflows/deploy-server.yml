@@ -1,0 +1,25 @@
+name: Deploy server to Oracle VM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'scripts/deploy-server.sh'
+      - '.github/workflows/deploy-server.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            if [ ! -f ~/ChaosManagement/scripts/deploy-server.sh ]; then
+              git clone --branch main https://github.com/jcharles22/ChaosManagement.git ~/ChaosManagement
+            fi
+            bash ~/ChaosManagement/scripts/deploy-server.sh

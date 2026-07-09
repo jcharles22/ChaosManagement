@@ -1,0 +1,18 @@
+[Unit]
+Description=Chaos Management game server
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ChaosManagement/server
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=TICK_HZ=20
+Environment=NODE_OPTIONS=--max-old-space-size=384
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

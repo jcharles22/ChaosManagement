@@ -28,6 +28,9 @@ export class Room {
   removePlayer(id: string): void {
     this.world.removePlayer(id);
     this.sockets.delete(id);
+    if (this.world.isStarted()) {
+      this.broadcast({ type: 'player_left', leftPlayerId: id });
+    }
   }
 
   setReady(id: string): void {
@@ -71,7 +74,7 @@ export class Room {
   }
 
   getPlayerRole(id: string): CrewRole | undefined {
-    return this.world.getSnapshot().players.find((p) => p.id === id)?.role;
+    return this.world.getPlayerRole(id);
   }
 
   broadcastState(): void {

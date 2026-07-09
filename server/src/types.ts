@@ -60,13 +60,14 @@ export interface WorldSnapshot {
     progress: number;
     repairProgress: number;
     powered: boolean;
-    inputItems: string[];
-    outputItems: string[];
+    inputItems: { id: string; type: ItemType }[];
+    outputItems: { id: string; type: ItemType }[];
   }[];
   breaches: { id: string; x: number; y: number; size: number }[];
   floorItems: { id: string; type: ItemType; x: number; y: number }[];
   asteroids: { ship: ShipStateNet; bodies: SimBodyNet[] };
   gameOver?: { reason: string; score: number; wave: number; survivedMs: number };
+  events?: string[];
 }
 
 export interface ClientMessage {

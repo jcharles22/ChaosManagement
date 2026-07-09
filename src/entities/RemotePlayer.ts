@@ -23,7 +23,9 @@ export class RemotePlayer {
   private roleText: Phaser.GameObjects.Text;
   readonly id: string;
   private isLocal: boolean;
+  private role: CrewRole;
   private carriedCount = 0;
+  private repairText: Phaser.GameObjects.Text;
 
   constructor(
     scene: Phaser.Scene,
@@ -36,6 +38,7 @@ export class RemotePlayer {
   ) {
     this.id = id;
     this.isLocal = isLocal;
+    this.role = role;
 
     const color = ROLE_COLORS[role];
     this.body = scene.add.rectangle(0, 0, 22, 28, color, 1);
@@ -58,6 +61,16 @@ export class RemotePlayer {
         color: '#aabbcc',
       })
       .setOrigin(0.5);
+    this.repairText = scene.add
+      .text(0, -28, 'REPAIRING', {
+        fontFamily: 'Courier New, monospace',
+        fontSize: '8px',
+        color: '#ffcc66',
+        backgroundColor: '#000000aa',
+        padding: { x: 3, y: 1 },
+      })
+      .setOrigin(0.5)
+      .setVisible(false);
 
     this.sprite = scene.add.container(x, y, [
       this.body,
@@ -65,6 +78,7 @@ export class RemotePlayer {
       visor,
       this.nameText,
       this.roleText,
+      this.repairText,
     ]);
     this.sprite.setDepth(isLocal ? 41 : 39);
   }
@@ -79,6 +93,11 @@ export class RemotePlayer {
 
   setCarriedCount(n: number): void {
     this.carriedCount = n;
+  }
+
+  setRepairing(on: boolean): void {
+    this.repairText.setVisible(on);
+    this.body.setFillStyle(on ? 0xffcc66 : ROLE_COLORS[this.role]);
   }
 
   /** Immediate local movement — no waiting for server round-trip */

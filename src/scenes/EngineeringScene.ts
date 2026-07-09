@@ -37,6 +37,8 @@ export class EngineeringScene extends Phaser.Scene {
   private worldSync: WorldSync | null = null;
   private unsubNetwork: (() => void) | null = null;
   private wasInteractDown = false;
+  private lastInputSentAt = 0;
+  private lastSentMove = { x: 0, y: 0 };
   private lastSnapshotTick = -1;
   private netPowerKeys: Phaser.Input.Keyboard.Key[] = [];
   private mpBanner!: Phaser.GameObjects.Text;
@@ -192,10 +194,12 @@ export class EngineeringScene extends Phaser.Scene {
       if (msg.type === 'world' && msg.snapshot) {
         if (msg.snapshot.tick === this.lastSnapshotTick) return;
         this.lastSnapshotTick = msg.snapshot.tick;
-        this.worldSync!.onSnapshot(msg.snapshot, this.mp!.playerId);
+        const fx = this.worldSync!.onSnapshot(msg.snapshot, this.mp!.playerId);
+        this.handleNetworkSideEffects(fx);
         const me = msg.snapshot.players.find((p) => p.id === this.mp!.playerId);
         if (me?.powerConsoleOpen && !this.powerUI.visible) this.powerUI.open();
         if (!me?.powerConsoleOpen && this.powerUI.visible) this.powerUI.close();
+        if (me) this.player.repairing = me.repairing ?? false;
         if (msg.snapshot.gameOver) {
           this.time.delayedCall(600, () => {
             this.scene.start('GameOver', msg.snapshot!.gameOver);
@@ -212,6 +216,18 @@ export class EngineeringScene extends Phaser.Scene {
     const down = held && !this.wasInteractDown;
     const up = !held && this.wasInteractDown;
     this.wasInteractDown = held;
+
+    const interactChanged = down || up || this.player.interactJustPressed;
+    const moveChanged =
+      Math.abs(move.x - this.lastSentMove.x) > 0.01 ||
+      Math.abs(move.y - this.lastSentMove.y) > 0.01;
+    const now = performance.now();
+    const due = now - this.lastInputSentAt >= 50;
+
+    if (!interactChanged && !moveChanged && !due) return;
+
+    this.lastInputSentAt = now;
+    this.lastSentMove = { x: move.x, y: move.y };
     this.mp.client.sendInput({
       move,
       interactDown: down || this.player.interactJustPressed,
@@ -540,14 +556,18 @@ export class EngineeringScene extends Phaser.Scene {
       this.hud.update();
       this.worldSync.updateCrew(dt, this.mp.playerId);
       this.updateCarryHighlights(this.worldSync.getLocalCarriedType());
+      for (const m of this.machines) m.tickBrokenSparks(dt);
+      this.animateOutBelts(dt);
+      this.updatePrompt({
+        x: this.player.x,
+        y: this.player.y,
+        carriedType: this.worldSync.getLocalCarriedType(),
+        repairing: this.player.repairing,
+        multiplayer: true,
+      });
       if (this.powerUI.visible) {
         this.handleNetworkPowerKeys();
       }
-      this.promptText.setText(
-        this.powerUI.visible
-          ? 'POWER CONSOLE — 1-4 add pips, Q/A/Z/X remove, E close'
-          : 'WASD move · E interact · Hold E repair — all players share this ship',
-      );
       return;
     }
 
@@ -836,19 +856,57 @@ export class EngineeringScene extends Phaser.Scene {
     }
   }
 
-  private updatePrompt(): void {
+  private handleNetworkSideEffects(fx: { events: string[]; newDemands: boolean }): void {
+    if (fx.newDemands) {
+      this.intercomUI.ping();
+      sfx.intercom();
+    }
+    for (const ev of fx.events) {
+      if (ev === '__ship_hit__') {
+        this.asteroidsView.flashHit();
+        sfx.hit();
+        continue;
+      }
+      this.showToast(ev);
+      if (ev.includes('repaired') || ev.includes('Breach sealed')) sfx.repair();
+      if (ev.includes('Shell loaded') || ev.includes('Ammo loaded') || ev.includes('Dropped into')) {
+        sfx.deposit();
+      }
+      if (ev.includes('shell to cannon')) this.outShellVisual = 0.35;
+      if (ev.includes('ammo to MG')) this.outAmmoVisual = 0.25;
+      if (ev.includes('+') && ev.includes('fuel')) sfx.deposit();
+    }
+    if (this.storage.capacity !== this.state.storageCapacity) {
+      this.storage.setCapacity(this.state.storageCapacity);
+    }
+  }
+
+  private updatePrompt(opts?: {
+    x: number;
+    y: number;
+    carriedType: ItemType | null;
+    repairing: boolean;
+    multiplayer: boolean;
+  }): void {
     if (this.powerUI.visible) {
       this.promptText.setText('POWER CONSOLE — 1-4 add pips, Q/A/Z/X remove, E close');
       return;
     }
-    const p = this.player;
-    const carried = p.peek();
 
-    if (this.powerUI.near(p.x, p.y)) {
+    const mp = opts?.multiplayer ?? false;
+    const x = opts?.x ?? this.player.x;
+    const y = opts?.y ?? this.player.y;
+    const carriedType =
+      opts !== undefined
+        ? opts.carriedType
+        : (this.player.peek()?.type ?? null);
+    const carried = carriedType ? { type: carriedType } : null;
+
+    if (this.powerUI.near(x, y)) {
       this.promptText.setText('E — Open Power Console');
       return;
     }
-    if (Phaser.Math.Distance.Between(p.x, p.y, this.upgradeBayPos.x, this.upgradeBayPos.y) < 55) {
+    if (Phaser.Math.Distance.Between(x, y, this.upgradeBayPos.x, this.upgradeBayPos.y) < 55) {
       this.promptText.setText(
         carried?.type === 'upgrade_module'
           ? 'E — Install upgrade module'
@@ -856,35 +914,36 @@ export class EngineeringScene extends Phaser.Scene {
       );
       return;
     }
-    if (this.damage.nearestBreach(p.x, p.y, 45)) {
+    if (!mp && this.damage.nearestBreach(x, y, 45)) {
       this.promptText.setText('Hold E — Seal hull breach');
       return;
     }
-    if (this.machines.some((m) => m.broken && m.near(p.x, p.y, 55))) {
+    if (mp && this.worldSync && this.hasNetworkBreachNear(x, y, 45)) {
+      this.promptText.setText('Hold E — Seal hull breach');
+      return;
+    }
+    if (this.machines.some((m) => m.broken && m.near(x, y, 55))) {
       this.promptText.setText('Hold E — Repair machine');
       return;
     }
 
     if (carried) {
       const label = ITEM_LABELS[carried.type];
-      // Near a valid machine input?
       for (const m of this.machines) {
-        if (m.inputChest.near(p.x, p.y) && m.inputChest.canAccept(carried.type)) {
+        if (m.inputChest.near(x, y) && m.inputChest.canAccept(carried.type)) {
           this.promptText.setText(`E — Drop ${label} into ${m.id.replace(/_/g, ' ')} IN`);
           return;
         }
-        if (m.inputChest.near(p.x, p.y) && !m.inputChest.canAccept(carried.type)) {
-          this.promptText.setText(
-            `Wrong item — this IN wants ${ITEM_LABELS[m.recipe.input]}`,
-          );
+        if (m.inputChest.near(x, y) && !m.inputChest.canAccept(carried.type)) {
+          this.promptText.setText(`Wrong item — this IN wants ${ITEM_LABELS[m.recipe.input]}`);
           return;
         }
       }
-      if (carried.type === 'heavy_shell' && this.nearBelt(this.shellOutBelt, p.x, p.y, 50)) {
+      if (carried.type === 'heavy_shell' && this.nearBelt(this.shellOutBelt, x, y, 50)) {
         this.promptText.setText('E — Load shell onto cannon belt');
         return;
       }
-      if (carried.type === 'ammo_box' && this.nearBelt(this.ammoOutBelt, p.x, p.y, 50)) {
+      if (carried.type === 'ammo_box' && this.nearBelt(this.ammoOutBelt, x, y, 50)) {
         this.promptText.setText('E — Load ammo onto MG belt');
         return;
       }
@@ -909,34 +968,40 @@ export class EngineeringScene extends Phaser.Scene {
         return;
       }
       if (carried.type === 'ingot') {
-        this.promptText.setText(
-          `Carrying ${label} — drop in Shell Fab (2x) or Ammo Fab IN`,
-        );
+        this.promptText.setText(`Carrying ${label} — drop in Shell Fab (2x) or Ammo Fab IN`);
         return;
       }
       this.promptText.setText(`Carrying ${label} — stand on green DROP IN and press E`);
       return;
     }
 
-    // Not carrying — suggest pickups
     for (const m of this.machines) {
-      if (m.outputChest.items.length > 0 && m.outputChest.near(p.x, p.y, 55)) {
+      if (m.outputChest.displayCount > 0 && m.outputChest.near(x, y, 55)) {
         const out = m.recipe.output === 'ship_fuel' ? 'fuel' : ITEM_LABELS[m.recipe.output as ItemType];
         this.promptText.setText(`E — TAKE OUT ${out} (then deliver it)`);
         return;
       }
     }
-    if (this.storage.containsPoint(p.x, p.y, 55) && this.storage.items.length > 0) {
+    if (this.storage.containsPoint(x, y, 55) && this.storage.displayCount > 0) {
       this.promptText.setText('E — TAKE from STORAGE, then drop into a machine IN');
       return;
     }
-    if (this.incomingBelt.nearestItem(p.x, p.y, 40)) {
+    const beltNear =
+      (mp && this.worldSync?.hasBeltItemNear('incoming', x, y, 40)) ||
+      (!mp && !!this.incomingBelt.nearestItem(x, y, 40));
+    if (beltNear) {
       this.promptText.setText('E — Pick up from incoming belt');
       return;
     }
     this.promptText.setText(
-      'Pick up from belt/STORAGE → DROP IN (green) → TAKE OUT (orange) → feed right belts',
+      mp
+        ? 'WASD move · E interact · Hold E repair — all players share this ship'
+        : 'Pick up from belt/STORAGE → DROP IN (green) → TAKE OUT (orange) → feed right belts',
     );
+  }
+
+  private hasNetworkBreachNear(x: number, y: number, radius: number): boolean {
+    return this.worldSync?.hasBreachNear(x, y, radius) ?? false;
   }
 
   private checkFuelStarve(dt: number): void {

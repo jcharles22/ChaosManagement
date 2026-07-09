@@ -43,12 +43,40 @@ Open 3 browser tabs → **Create game** in tab 1 → share the room code → **J
 ## Online multiplayer
 
 - Up to **3 players** per room with roles: Captain, Heavy Gunner, MG Gunner
-- **Server-authoritative** — one shared ship simulation runs on Render; all clients see the same fuel, hull, belts, machines, breaches, and bridge feed
-- Clients send movement + interact input; server broadcasts full world state ~20×/sec
+- **Server-authoritative** — one shared ship simulation runs on your game server; all clients see the same fuel, hull, belts, machines, breaches, and bridge feed
+- Clients send movement + interact input (~20×/sec); server broadcasts world state at 20 Hz with WebSocket compression
 
 ## Deploy
 
-### Server → Render (free)
+### Server → Oracle Cloud (free, always-on) — recommended
+
+The repo includes a GitHub Action that deploys to an Oracle Always Free VM on every push to `main` (when `server/` changes).
+
+**One-time VM setup** (Ubuntu):
+
+```bash
+# Node 20+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs nginx git
+
+# Clone and build
+git clone https://github.com/jcharles22/ChaosManagement.git ~/ChaosManagement
+cd ~/ChaosManagement/server && npm ci && npm run build
+
+# Install systemd service (edit User/WorkingDirectory if not ubuntu)
+sudo cp ~/ChaosManagement/scripts/chaos-server.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now chaos-server
+
+# Optional: nginx WebSocket proxy (see scripts/nginx-ws.example.conf)
+sudo certbot --nginx -d game.yourdomain.com   # for wss://
+```
+
+**GitHub secrets** for auto-deploy: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`
+
+WebSocket endpoint: `wss://game.yourdomain.com/ws` (or your VM IP if not using nginx)
+
+### Server → Render (alternative)
 
 1. Push this repo to GitHub
 2. [Render](https://render.com) → **New Web Service** → connect repo
@@ -64,6 +92,8 @@ Open 3 browser tabs → **Create game** in tab 1 → share the room code → **J
 4. Note your URL: `https://your-app.onrender.com`
 5. WebSocket endpoint: `wss://your-app.onrender.com/ws`
 
+> Render free tier sleeps when idle — Oracle Always Free is better for low-latency multiplayer.
+
 ### Client → Cloudflare Pages (free)
 
 1. Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** → connect repo
@@ -77,7 +107,7 @@ Open 3 browser tabs → **Create game** in tab 1 → share the room code → **J
 3. **Environment variable** (Production):
 
 ```
-VITE_SERVER_URL = wss://your-app.onrender.com/ws
+VITE_SERVER_URL = wss://game.yourdomain.com/ws
 ```
 
 4. Deploy → share your `*.pages.dev` URL with friends

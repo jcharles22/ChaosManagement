@@ -31,6 +31,11 @@ const BELT_POINTS: Record<string, { x: number; y: number }[]> = {
   ],
 };
 
+export interface NetworkSideEffects {
+  events: string[];
+  newDemands: boolean;
+}
+
 export class WorldSync {
   private scene: Phaser.Scene;
   private state: GameState;
@@ -47,6 +52,9 @@ export class WorldSync {
   private beltBlockedCache = new Map<string, boolean>();
   private machineCache = new Map<string, string>();
   private localCarriedType: ItemType | null = null;
+  private lastDemandCount = 0;
+  private beltItemsCache = new Map<string, { id: string; type: ItemType; progress: number }[]>();
+  private breachCache: { x: number; y: number }[] = [];
 
   constructor(
     scene: Phaser.Scene,
@@ -64,12 +72,13 @@ export class WorldSync {
     this.storage = storage;
   }
 
-  onSnapshot(snapshot: WorldSnapshot, localPlayerId: string): void {
+  onSnapshot(snapshot: WorldSnapshot, localPlayerId: string): NetworkSideEffects {
     this.playerBuffer.push(snapshot);
 
+    let sideEffects: NetworkSideEffects = { events: [], newDemands: false };
     if (snapshot.tick !== this.lastTick) {
       this.lastTick = snapshot.tick;
-      this.applyWorldState(snapshot);
+      sideEffects = this.applyWorldState(snapshot);
     }
 
     for (const p of snapshot.players) {
@@ -87,6 +96,7 @@ export class WorldSync {
         this.crew.set(p.id, crew);
       }
       crew.setCarriedCount(p.carried?.length ?? 0);
+      crew.setRepairing(p.repairing ?? false);
       if (p.id === localPlayerId) {
         this.localCarriedType =
           p.carried && p.carried.length > 0 ? p.carried[p.carried.length - 1] : null;
@@ -100,10 +110,29 @@ export class WorldSync {
         this.crew.delete(id);
       }
     }
+
+    return sideEffects;
   }
 
   getLocalCarriedType(): ItemType | null {
     return this.localCarriedType;
+  }
+
+  hasBeltItemNear(beltId: string, x: number, y: number, radius: number): boolean {
+    const points = BELT_POINTS[beltId] ?? [];
+    const items = this.beltItemsCache.get(beltId) ?? [];
+    for (const bi of items) {
+      const pt = beltPointAt(points, bi.progress);
+      if (Phaser.Math.Distance.Between(x, y, pt.x, pt.y) < radius) return true;
+    }
+    return false;
+  }
+
+  hasBreachNear(x: number, y: number, radius: number): boolean {
+    for (const b of this.breachCache) {
+      if (Phaser.Math.Distance.Between(x, y, b.x, b.y) < radius) return true;
+    }
+    return false;
   }
 
   predictLocal(
@@ -129,13 +158,16 @@ export class WorldSync {
     return this.crew.get(id);
   }
 
-  private applyWorldState(snapshot: WorldSnapshot): void {
+  private applyWorldState(snapshot: WorldSnapshot): NetworkSideEffects {
     Object.assign(this.state, snapshot.ship);
     this.state.pips = { ...snapshot.ship.pips };
     this.state.demands = [...snapshot.ship.demands];
     this.state.upgrades = [...snapshot.ship.upgrades];
 
-    // Asteroids — update when server sends body data (every other tick)
+    const newDemands = snapshot.ship.demands.length > this.lastDemandCount;
+    this.lastDemandCount = snapshot.ship.demands.length;
+
+    // Asteroids — update when server sends body data (every 3rd tick)
     if (snapshot.asteroids.bodies.length > 0) {
       this.lastAsteroidTick = snapshot.tick;
       this.sim.ship = { ...snapshot.asteroids.ship };
@@ -145,8 +177,10 @@ export class WorldSync {
     }
 
     const liveIds = new Set<string>();
+    this.beltItemsCache.clear();
 
     for (const belt of snapshot.belts) {
+      this.beltItemsCache.set(belt.id, belt.items);
       const beltEnt = this.belts[belt.id];
       if (beltEnt) {
         const prev = this.beltBlockedCache.get(belt.id);
@@ -169,23 +203,34 @@ export class WorldSync {
       }
     }
 
-    for (const si of snapshot.storage.items) liveIds.add(si.id);
+    for (let i = 0; i < snapshot.storage.items.length; i++) {
+      const si = snapshot.storage.items[i];
+      liveIds.add(si.id);
+      const item = this.ensureItem(si.id, si.type);
+      this.storage.layoutNetworkItem(item, i);
+    }
     this.storage.setNetworkCount(snapshot.storage.items.length, snapshot.storage.capacity);
 
     for (const m of snapshot.machines) {
-      const key = `${m.broken}|${m.crafting}|${m.progress.toFixed(2)}|${m.powered}|${m.inputItems.length}|${m.outputItems.length}`;
-      if (this.machineCache.get(m.id) === key) continue;
-      this.machineCache.set(m.id, key);
+      const itemKey = `${m.inputItems.map((i) => i.id).join(',')}|${m.outputItems.map((i) => i.id).join(',')}`;
+      const stateKey = `${m.broken}|${m.crafting}|${m.progress.toFixed(2)}|${m.powered}|${m.repairProgress.toFixed(2)}|${itemKey}`;
       const machine = this.machines.find((x) => x.id === m.id);
-      machine?.applyNetworkState({
-        broken: m.broken,
-        crafting: m.crafting,
-        progress: m.progress,
-        repairProgress: m.repairProgress,
-        powered: m.powered,
-        inputCount: m.inputItems.length,
-        outputCount: m.outputItems.length,
-      });
+      if (machine && this.machineCache.get(m.id) !== stateKey) {
+        this.machineCache.set(m.id, stateKey);
+        machine.applyNetworkState({
+          broken: m.broken,
+          crafting: m.crafting,
+          progress: m.progress,
+          repairProgress: m.repairProgress,
+          powered: m.powered,
+          inputCount: m.inputItems.length,
+          outputCount: m.outputItems.length,
+        });
+      }
+      machine?.inputChest.syncNetworkItems(m.inputItems, (id, type) => this.ensureItem(id, type));
+      machine?.outputChest.syncNetworkItems(m.outputItems, (id, type) => this.ensureItem(id, type));
+      for (const item of m.inputItems) liveIds.add(item.id);
+      for (const item of m.outputItems) liveIds.add(item.id);
     }
 
     for (const fi of snapshot.floorItems) {
@@ -194,6 +239,8 @@ export class WorldSync {
       item.setPosition(fi.x, fi.y);
       item.sprite.setVisible(true);
       item.sprite.setScale(1);
+      item.onBelt = false;
+      item.carried = false;
     }
 
     for (const p of snapshot.players) {
@@ -207,6 +254,8 @@ export class WorldSync {
           item.sprite.setVisible(true);
           item.sprite.setScale(0.85);
           item.sprite.setDepth(42);
+          item.onBelt = false;
+          item.carried = true;
         }
       }
     }
@@ -226,6 +275,7 @@ export class WorldSync {
       }
       breach.setNetworkState(b.x, b.y, b.size);
     }
+    this.breachCache = snapshot.breaches.map((b) => ({ x: b.x, y: b.y }));
 
     for (const [id, breach] of [...this.breaches]) {
       if (!snapshot.breaches.some((b) => b.id === id)) {
@@ -233,6 +283,11 @@ export class WorldSync {
         this.breaches.delete(id);
       }
     }
+
+    return {
+      events: snapshot.events ?? [],
+      newDemands,
+    };
   }
 
   destroy(): void {
@@ -243,6 +298,8 @@ export class WorldSync {
     for (const b of this.breaches.values()) b.sprite.destroy();
     this.breaches.clear();
     this.playerBuffer.clear();
+    this.beltItemsCache.clear();
+    this.machineCache.clear();
   }
 
   private ensureItem(id: string, type: import('../core/types').ItemType): ItemEntity {

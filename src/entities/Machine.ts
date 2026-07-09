@@ -16,6 +16,7 @@ export class Chest {
   private tag: Phaser.GameObjects.Text;
   private acceptText: Phaser.GameObjects.Text;
   private highlight: Phaser.GameObjects.Rectangle;
+  private networkCount = 0;
   kind: 'input' | 'output';
 
   constructor(
@@ -75,7 +76,11 @@ export class Chest {
   }
 
   get isFull(): boolean {
-    return this.items.length >= this.capacity;
+    return this.displayCount >= this.capacity;
+  }
+
+  get displayCount(): number {
+    return this.items.length > 0 ? this.items.length : this.networkCount;
   }
 
   canAccept(type: ItemType): boolean {
@@ -156,11 +161,37 @@ export class Chest {
   }
 
   setCount(n: number): void {
+    this.networkCount = n;
     this.countText.setText(String(n));
     this.body.setFillStyle(
-      this.isFull ? 0x664444 : this.kind === 'input' ? 0x1e4a32 : 0x4a3218,
+      n >= this.capacity ? 0x664444 : this.kind === 'input' ? 0x1e4a32 : 0x4a3218,
     );
     if (this.kind === 'output') this.setOutputReady(n > 0);
+  }
+
+  /** Sync chest contents from server snapshot (multiplayer). */
+  syncNetworkItems(
+    items: { id: string; type: ItemType }[],
+    ensure: (id: string, type: ItemType) => ItemEntity,
+  ): void {
+    this.networkCount = items.length;
+    this.items = items.map((entry) => {
+      const item = ensure(entry.id, entry.type);
+      item.onBelt = false;
+      item.carried = false;
+      item.sprite.setVisible(false);
+      item.setPosition(this.x, this.y);
+      return item;
+    });
+    this.countText.setText(String(items.length));
+    this.body.setFillStyle(
+      items.length >= this.capacity
+        ? 0x664444
+        : this.kind === 'input'
+          ? 0x1e4a32
+          : 0x4a3218,
+    );
+    if (this.kind === 'output') this.setOutputReady(items.length > 0);
   }
 
   private refresh(): void {
@@ -417,6 +448,15 @@ export class Machine {
     }
   }
 
+  tickBrokenSparks(dt: number): void {
+    if (!this.broken) return;
+    this.sparkTimer += dt;
+    if (this.sparkTimer > 0.25) {
+      this.sparkTimer = 0;
+      this.spawnSpark();
+    }
+  }
+
   applyNetworkState(data: {
     broken: boolean;
     crafting: boolean;
@@ -454,6 +494,13 @@ export class Machine {
     }
     this.inputChest.setCount(data.inputCount);
     this.outputChest.setCount(data.outputCount);
+    if (data.broken) {
+      this.progressBar.width = Math.min(52, data.repairProgress * 52);
+      if (data.repairProgress > 0 && data.repairProgress < 1) {
+        this.statusText.setText('REPAIRING');
+        this.statusText.setColor('#ffcc66');
+      }
+    }
   }
 
   private spawnSpark(): void {
