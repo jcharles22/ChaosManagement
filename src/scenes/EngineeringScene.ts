@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import { bus } from '../core/EventBus';
 import { createInitialState, type GameState } from '../core/GameState';
-import type { ItemType, MachineId } from '../core/types';
+import type { CrewRole, ItemType, MachineId } from '../core/types';
 import { Player } from '../entities/Player';
+import { RemotePlayer } from '../entities/RemotePlayer';
+import { getSession, type MultiplayerSession } from '../network/GameClient';
 import { ItemEntity } from '../entities/Item';
 import { ConveyorBelt } from '../entities/ConveyorBelt';
 import { StorageContainer } from '../entities/StorageContainer';
@@ -22,9 +24,19 @@ import { ITEM_LABELS } from '../core/types';
 const ROOM = { w: 1280, h: 720 };
 const FLOOR = new Phaser.Geom.Rectangle(40, 200, 1200, 480);
 
+const ROLE_LABELS: Record<CrewRole, string> = {
+  captain: 'Captain',
+  heavy_gunner: 'Heavy Gunner',
+  mg_gunner: 'MG Gunner',
+};
+
 export class EngineeringScene extends Phaser.Scene {
   private state!: GameState;
   private player!: Player;
+  private mp: MultiplayerSession | null = null;
+  private remotePlayers = new Map<string, RemotePlayer>();
+  private unsubNetwork: (() => void) | null = null;
+  private mpBanner!: Phaser.GameObjects.Text;
   private incomingBelt!: ConveyorBelt;
   private shellOutBelt!: ConveyorBelt;
   private ammoOutBelt!: ConveyorBelt;
@@ -56,6 +68,10 @@ export class EngineeringScene extends Phaser.Scene {
     super('Engineering');
   }
 
+  init(data?: { multiplayer?: boolean }): void {
+    this.mp = data?.multiplayer ? getSession() : null;
+  }
+
   create(): void {
     bus.clear();
     this.state = createInitialState();
@@ -78,7 +94,8 @@ export class EngineeringScene extends Phaser.Scene {
     this.sim = new AsteroidsSim(this.power, this.state, this.intercom);
     this.asteroidsView = new AsteroidsView(this, 640, 118, this.sim, this.state);
 
-    this.player = new Player(this, 640, 420);
+    const spawn = this.getLocalSpawn();
+    this.player = new Player(this, spawn.x, spawn.y);
 
     this.hud = new Hud(this, this.state);
     this.intercomUI = new IntercomUI(this, this.state);
@@ -102,8 +119,67 @@ export class EngineeringScene extends Phaser.Scene {
       .setDepth(160)
       .setScrollFactor(0);
 
+    this.mpBanner = this.add
+      .text(640, 56, '', {
+        fontFamily: 'Courier New, monospace',
+        fontSize: '11px',
+        color: '#88ffaa',
+        backgroundColor: '#0a2018cc',
+        padding: { x: 8, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(170)
+      .setScrollFactor(0);
+
+    if (this.mp) {
+      this.setupMultiplayer();
+    } else {
+      this.mpBanner.setVisible(false);
+    }
+
     this.wireEvents();
     this.cameras.main.setBackgroundColor(0x0a0e14);
+  }
+
+  private getLocalSpawn(): { x: number; y: number } {
+    if (!this.mp) return { x: 640, y: 420 };
+    const me = this.mp.players.find((p) => p.id === this.mp!.playerId);
+    if (me) return { x: me.x, y: me.y };
+    const spawns: Record<CrewRole, { x: number; y: number }> = {
+      captain: { x: 500, y: 420 },
+      heavy_gunner: { x: 640, y: 420 },
+      mg_gunner: { x: 780, y: 420 },
+    };
+    return spawns[this.mp.role];
+  }
+
+  private setupMultiplayer(): void {
+    if (!this.mp) return;
+
+    this.mpBanner.setText(
+      `ONLINE — Room ${this.mp.roomCode} · You: ${ROLE_LABELS[this.mp.role]} · Movement synced`,
+    );
+
+    for (const p of this.mp.players) {
+      if (p.id === this.mp.playerId) continue;
+      this.remotePlayers.set(
+        p.id,
+        new RemotePlayer(this, p.id, p.name, p.role, p.x, p.y),
+      );
+    }
+
+    this.unsubNetwork = this.mp.client.onMessage((msg) => {
+      if (msg.type !== 'state' || !msg.players) return;
+      for (const p of msg.players) {
+        if (p.id === this.mp!.playerId) continue;
+        let remote = this.remotePlayers.get(p.id);
+        if (!remote) {
+          remote = new RemotePlayer(this, p.id, p.name, p.role, p.x, p.y);
+          this.remotePlayers.set(p.id, remote);
+        }
+        remote.setTarget(p.x, p.y);
+      }
+    });
   }
 
   private drawRoom(): void {
@@ -428,6 +504,14 @@ export class EngineeringScene extends Phaser.Scene {
     } else {
       this.player.update(dt, FLOOR);
       this.handleInteract(dt);
+      if (this.mp) {
+        const move = this.player.getMoveInput();
+        this.mp.client.sendInput(move);
+      }
+    }
+
+    for (const remote of this.remotePlayers.values()) {
+      remote.update(dt);
     }
 
     this.updatePrompt();
@@ -826,6 +910,10 @@ export class EngineeringScene extends Phaser.Scene {
 
   shutdown(): void {
     for (const u of this.unsubs) u();
+    this.unsubNetwork?.();
+    this.unsubNetwork = null;
+    for (const remote of this.remotePlayers.values()) remote.destroy();
+    this.remotePlayers.clear();
     bus.clear();
   }
 }

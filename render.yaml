@@ -1,0 +1,10 @@
+# Optional Render blueprint — import at render.com/blueprints
+services:
+  - type: web
+    name: chaos-management-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /

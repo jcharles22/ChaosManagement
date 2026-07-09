@@ -68,7 +68,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const start = this.add
-      .text(width / 2, 500, '[ E / ENTER / CLICK — START SHIFT ]', {
+      .text(width / 2, 500, '[ E / ENTER / CLICK — START ]', {
         fontFamily: 'Courier New, monospace',
         fontSize: '16px',
         color: '#88ffaa',
@@ -84,14 +84,14 @@ export class MenuScene extends Phaser.Scene {
       repeat: -1,
     });
 
-    const go = () => this.scene.start('Engineering');
+    const go = () => this.scene.start('Lobby');
     start.on('pointerdown', go);
     this.input.keyboard!.on('keydown-ENTER', go);
     this.input.keyboard!.on('keydown-E', go);
     this.input.keyboard!.on('keydown-SPACE', go);
 
     this.add
-      .text(width / 2, 580, 'WASD move · E interact · Hold E repair · Power: 1-4 / QAZX', {
+      .text(width / 2, 580, 'WASD move · E interact · Online: create/join a 3-player room', {
         fontFamily: 'Courier New, monospace',
         fontSize: '11px',
         color: '#556677',

@@ -1,5 +1,8 @@
 node_modules
 dist
+server/node_modules
+server/dist
 .DS_Store
 *.local
+.env.local
 .vite

@@ -72,9 +72,7 @@ export class Player {
     return this.keys.interact.isDown;
   }
 
-  update(dt: number, bounds: Phaser.Geom.Rectangle): void {
-    this.interactPressed = Phaser.Input.Keyboard.JustDown(this.keys.interact);
-
+  getMoveInput(): { x: number; y: number } {
     const up = this.keys.up.isDown || this.keys.arrowUp.isDown;
     const down = this.keys.down.isDown || this.keys.arrowDown.isDown;
     const left = this.keys.left.isDown || this.keys.arrowLeft.isDown;
@@ -87,14 +85,23 @@ export class Player {
     if (left) vx -= 1;
     if (right) vx += 1;
 
-    if (vx !== 0 || vy !== 0) {
-      const len = Math.hypot(vx, vy);
-      vx /= len;
-      vy /= len;
-      this.facing.set(vx, vy);
+    if (vx === 0 && vy === 0) return { x: 0, y: 0 };
+    const len = Math.hypot(vx, vy);
+    return { x: vx / len, y: vy / len };
+  }
+
+  update(dt: number, bounds: Phaser.Geom.Rectangle): void {
+    this.interactPressed = Phaser.Input.Keyboard.JustDown(this.keys.interact);
+
+    const { x: vx, y: vy } = this.getMoveInput();
+    const moveX = vx;
+    const moveY = vy;
+
+    if (moveX !== 0 || moveY !== 0) {
+      this.facing.set(moveX, moveY);
       const mult = this.repairing ? 0.35 : this.carried.length > 0 ? 0.85 : 1;
-      this.sprite.x += vx * this.speed * mult * dt;
-      this.sprite.y += vy * this.speed * mult * dt;
+      this.sprite.x += moveX * this.speed * mult * dt;
+      this.sprite.y += moveY * this.speed * mult * dt;
     }
 
     this.sprite.x = Phaser.Math.Clamp(this.sprite.x, bounds.left + 16, bounds.right - 16);
