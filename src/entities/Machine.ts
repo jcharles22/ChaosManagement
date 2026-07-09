@@ -155,6 +155,14 @@ export class Chest {
     return Phaser.Math.Distance.Between(x, y, this.x, this.y) < r;
   }
 
+  setCount(n: number): void {
+    this.countText.setText(String(n));
+    this.body.setFillStyle(
+      this.isFull ? 0x664444 : this.kind === 'input' ? 0x1e4a32 : 0x4a3218,
+    );
+    if (this.kind === 'output') this.setOutputReady(n > 0);
+  }
+
   private refresh(): void {
     this.countText.setText(String(this.items.length));
     this.body.setFillStyle(
@@ -407,6 +415,45 @@ export class Machine {
         this.statusText.setColor('#ffff88');
       }
     }
+  }
+
+  applyNetworkState(data: {
+    broken: boolean;
+    crafting: boolean;
+    progress: number;
+    repairProgress: number;
+    powered: boolean;
+    inputCount: number;
+    outputCount: number;
+  }): void {
+    this.broken = data.broken;
+    this.crafting = data.crafting;
+    this.progress = data.progress;
+    this.repairProgress = data.repairProgress;
+    this.powered = data.powered;
+    this.progressBar.width = data.crafting ? Math.min(52, data.progress * 52) : 0;
+    if (data.broken) {
+      this.body.setFillStyle(0x662222);
+      this.body.setStrokeStyle(3, 0xff4444);
+      this.statusText.setText('BROKEN');
+      this.statusText.setColor('#ff6666');
+    } else if (!data.powered) {
+      this.statusText.setText('NO POWER');
+      this.statusText.setColor('#ffaa44');
+    } else if (data.crafting) {
+      this.statusText.setText('CRAFTING');
+      this.statusText.setColor('#88ccff');
+    } else if (data.outputCount > 0) {
+      this.statusText.setText('DONE — TAKE OUT');
+      this.statusText.setColor('#ffff88');
+    } else {
+      this.body.setFillStyle(0x3a5068);
+      this.body.setStrokeStyle(3, 0x6a90b0);
+      this.statusText.setText('READY');
+      this.statusText.setColor('#88ffaa');
+    }
+    this.inputChest.setCount(data.inputCount);
+    this.outputChest.setCount(data.outputCount);
   }
 
   private spawnSpark(): void {

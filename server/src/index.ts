@@ -1,5 +1,5 @@
 import http from 'http';
-import { WebSocketServer, WebSocket } from 'ws';
+import { WebSocketServer } from 'ws';
 import { Room } from './Room.js';
 import type { ClientMessage } from './types.js';
 
@@ -36,9 +36,7 @@ function getOrCreateRoom(code: string): Room {
 
 function cleanupRoom(code: string): void {
   const room = rooms.get(code);
-  if (room?.isEmpty()) {
-    rooms.delete(code);
-  }
+  if (room?.isEmpty()) rooms.delete(code);
 }
 
 wss.on('connection', (ws) => {
@@ -60,13 +58,13 @@ wss.on('connection', (ws) => {
       room = getOrCreateRoom(code);
       roomCode = code;
       playerId = room.addPlayer(ws, msg.name ?? 'Captain');
-      const p = room.getPlayerState().find((pl) => pl.id === playerId);
       room.send(ws, {
         type: 'joined',
         playerId: playerId!,
         code,
-        role: p?.role,
+        role: room.getPlayerRole(playerId!),
       });
+      room.broadcastState();
       return;
     }
 
@@ -82,19 +80,19 @@ wss.on('connection', (ws) => {
         );
         return;
       }
-      if (room.started) {
+      if (room.isStarted()) {
         ws.send(JSON.stringify({ type: 'error', message: 'Game already in progress' }));
         return;
       }
       roomCode = code;
       playerId = room.addPlayer(ws, msg.name ?? 'Engineer');
-      const p = room.getPlayerState().find((pl) => pl.id === playerId);
       room.send(ws, {
         type: 'joined',
         playerId: playerId!,
         code,
-        role: p?.role,
+        role: room.getPlayerRole(playerId!),
       });
+      room.broadcastState();
       return;
     }
 
@@ -102,13 +100,12 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'ready') {
       room.setReady(playerId);
-      if (room.allReady()) {
-        room.startGame();
-      }
+      room.broadcastState();
+      if (room.allReady()) room.startGame();
       return;
     }
 
-    if (msg.type === 'input') {
+    if (msg.type === 'input' || msg.type === 'power' || msg.type === 'power_console') {
       room.applyInput(playerId, msg);
     }
   });
@@ -116,15 +113,14 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (room && playerId) {
       room.removePlayer(playerId);
+      room.broadcastState();
       if (roomCode) cleanupRoom(roomCode);
     }
   });
 });
 
 setInterval(() => {
-  for (const room of rooms.values()) {
-    room.tick();
-  }
+  for (const room of rooms.values()) room.tick(1 / 20);
 }, 50);
 
 server.listen(PORT, () => {

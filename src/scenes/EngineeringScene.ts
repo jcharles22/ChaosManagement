@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import { bus } from '../core/EventBus';
 import { createInitialState, type GameState } from '../core/GameState';
-import type { CrewRole, ItemType, MachineId } from '../core/types';
+import type { CrewRole, ItemType, MachineId, PowerChannel } from '../core/types';
 import { Player } from '../entities/Player';
-import { RemotePlayer } from '../entities/RemotePlayer';
 import { getSession, type MultiplayerSession } from '../network/GameClient';
+import { WorldSync } from '../network/WorldSync';
 import { ItemEntity } from '../entities/Item';
 import { ConveyorBelt } from '../entities/ConveyorBelt';
 import { StorageContainer } from '../entities/StorageContainer';
@@ -34,8 +34,11 @@ export class EngineeringScene extends Phaser.Scene {
   private state!: GameState;
   private player!: Player;
   private mp: MultiplayerSession | null = null;
-  private remotePlayers = new Map<string, RemotePlayer>();
+  private worldSync: WorldSync | null = null;
   private unsubNetwork: (() => void) | null = null;
+  private wasInteractDown = false;
+  private lastSnapshotTick = -1;
+  private netPowerKeys: Phaser.Input.Keyboard.Key[] = [];
   private mpBanner!: Phaser.GameObjects.Text;
   private incomingBelt!: ConveyorBelt;
   private shellOutBelt!: ConveyorBelt;
@@ -132,12 +135,24 @@ export class EngineeringScene extends Phaser.Scene {
       .setScrollFactor(0);
 
     if (this.mp) {
+      this.player.sprite.setVisible(false);
+      const kb = this.input.keyboard!;
+      this.netPowerKeys = [
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.X),
+      ];
       this.setupMultiplayer();
     } else {
       this.mpBanner.setVisible(false);
+      this.wireEvents();
     }
 
-    this.wireEvents();
     this.cameras.main.setBackgroundColor(0x0a0e14);
   }
 
@@ -157,29 +172,63 @@ export class EngineeringScene extends Phaser.Scene {
     if (!this.mp) return;
 
     this.mpBanner.setText(
-      `ONLINE — Room ${this.mp.roomCode} · You: ${ROLE_LABELS[this.mp.role]} · Movement synced`,
+      `ONLINE — Room ${this.mp.roomCode} · You: ${ROLE_LABELS[this.mp.role]} · Shared ship state`,
     );
 
-    for (const p of this.mp.players) {
-      if (p.id === this.mp.playerId) continue;
-      this.remotePlayers.set(
-        p.id,
-        new RemotePlayer(this, p.id, p.name, p.role, p.x, p.y),
-      );
-    }
+    this.worldSync = new WorldSync(
+      this,
+      this.state,
+      this.sim,
+      this.machines,
+      {
+        incoming: this.incomingBelt,
+        shells: this.shellOutBelt,
+        ammo: this.ammoOutBelt,
+      },
+      this.storage,
+    );
 
     this.unsubNetwork = this.mp.client.onMessage((msg) => {
-      if (msg.type !== 'state' || !msg.players) return;
-      for (const p of msg.players) {
-        if (p.id === this.mp!.playerId) continue;
-        let remote = this.remotePlayers.get(p.id);
-        if (!remote) {
-          remote = new RemotePlayer(this, p.id, p.name, p.role, p.x, p.y);
-          this.remotePlayers.set(p.id, remote);
+      if (msg.type === 'world' && msg.snapshot) {
+        if (msg.snapshot.tick === this.lastSnapshotTick) return;
+        this.lastSnapshotTick = msg.snapshot.tick;
+        this.worldSync!.apply(msg.snapshot, this.mp!.playerId);
+        const me = msg.snapshot.players.find((p) => p.id === this.mp!.playerId);
+        if (me?.powerConsoleOpen && !this.powerUI.visible) this.powerUI.open();
+        if (!me?.powerConsoleOpen && this.powerUI.visible) this.powerUI.close();
+        if (msg.snapshot.gameOver) {
+          this.time.delayedCall(600, () => {
+            this.scene.start('GameOver', msg.snapshot!.gameOver);
+          });
         }
-        remote.setTarget(p.x, p.y);
       }
     });
+  }
+
+  private sendNetworkInput(): void {
+    if (!this.mp) return;
+    const move = this.player.getMoveInput();
+    const held = this.player.interactHeld;
+    const down = held && !this.wasInteractDown;
+    const up = !held && this.wasInteractDown;
+    this.wasInteractDown = held;
+    this.mp.client.sendInput({
+      move,
+      interactDown: down || this.player.interactJustPressed,
+      interactUp: up,
+      interactHeld: held,
+    });
+  }
+
+  private handleNetworkPowerKeys(): void {
+    if (!this.mp || !this.powerUI.visible) return;
+    const just = Phaser.Input.Keyboard.JustDown;
+    const channels: PowerChannel[] = ['engines', 'weapons', 'shields', 'fabricators'];
+    for (let i = 0; i < 4; i++) {
+      if (just(this.netPowerKeys[i])) this.mp.client.sendPower(channels[i], 1);
+      if (just(this.netPowerKeys[i + 4])) this.mp.client.sendPower(channels[i], -1);
+    }
+    this.powerUI.refresh();
   }
 
   private drawRoom(): void {
@@ -472,8 +521,28 @@ export class EngineeringScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    if (!this.state.alive) return;
     const dt = Math.min(0.05, delta / 1000);
+
+    if (this.mp && this.worldSync) {
+      if (!this.state.alive) return;
+      this.sendNetworkInput();
+      this.player.update(dt, FLOOR);
+      this.asteroidsView.update(dt);
+      this.intercomUI.update(dt);
+      this.hud.update();
+      this.worldSync.updateCrew(dt);
+      if (this.powerUI.visible) {
+        this.handleNetworkPowerKeys();
+      }
+      this.promptText.setText(
+        this.powerUI.visible
+          ? 'POWER CONSOLE — 1-4 add pips, Q/A/Z/X remove, E close'
+          : 'WASD move · E interact · Hold E repair — all players share this ship',
+      );
+      return;
+    }
+
+    if (!this.state.alive) return;
     this.state.elapsedMs += delta;
 
     // Systems
@@ -504,14 +573,6 @@ export class EngineeringScene extends Phaser.Scene {
     } else {
       this.player.update(dt, FLOOR);
       this.handleInteract(dt);
-      if (this.mp) {
-        const move = this.player.getMoveInput();
-        this.mp.client.sendInput(move);
-      }
-    }
-
-    for (const remote of this.remotePlayers.values()) {
-      remote.update(dt);
     }
 
     this.updatePrompt();
@@ -912,8 +973,8 @@ export class EngineeringScene extends Phaser.Scene {
     for (const u of this.unsubs) u();
     this.unsubNetwork?.();
     this.unsubNetwork = null;
-    for (const remote of this.remotePlayers.values()) remote.destroy();
-    this.remotePlayers.clear();
+    this.worldSync?.destroy();
+    this.worldSync = null;
     bus.clear();
   }
 }

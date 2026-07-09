@@ -1,4 +1,4 @@
-import type { CrewRole } from '../core/types';
+import type { PowerChannel } from '../core/types';
 import { SERVER_URL } from './config';
 import type { ClientMessage, PlayerState, ServerMessage } from './types';
 
@@ -70,8 +70,21 @@ export class GameClient {
     this.send({ type: 'ready' });
   }
 
-  sendInput(move: { x: number; y: number }): void {
-    this.send({ type: 'input', move });
+  sendInput(input: {
+    move: { x: number; y: number };
+    interactDown?: boolean;
+    interactUp?: boolean;
+    interactHeld?: boolean;
+  }): void {
+    this.send({ type: 'input', ...input });
+  }
+
+  sendPower(channel: PowerChannel, delta: 1 | -1): void {
+    this.send({ type: 'power', channel, delta });
+  }
+
+  setPowerConsole(open: boolean): void {
+    this.send({ type: 'power_console', open });
   }
 
   disconnect(): void {
@@ -85,7 +98,7 @@ export class GameClient {
 export interface MultiplayerSession {
   client: GameClient;
   playerId: string;
-  role: CrewRole;
+  role: import('../core/types').CrewRole;
   roomCode: string;
   players: PlayerState[];
 }

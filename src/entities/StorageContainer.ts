@@ -155,6 +155,12 @@ export class StorageContainer {
     );
   }
 
+  setNetworkCount(count: number, capacity: number): void {
+    this.capacity = capacity;
+    this.labelText.setText(`${count}/${capacity}`);
+    this.bodyGfx.setFillStyle(count >= capacity ? 0x664444 : 0x3a4558);
+  }
+
   containsPoint(x: number, y: number, radius = 50): boolean {
     return Phaser.Math.Distance.Between(x, y, this.x, this.y) < radius;
   }

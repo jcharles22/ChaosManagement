@@ -63,6 +63,15 @@ export class HullBreach {
     return false;
   }
 
+  setNetworkState(x: number, y: number, size: number): void {
+    this.x = x;
+    this.y = y;
+    this.size = size;
+    this.sprite.setPosition(x, y);
+    this.ring.setRadius(size);
+    this.redraw();
+  }
+
   private redraw(): void {
     const g = this.crack;
     g.clear();

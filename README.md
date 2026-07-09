@@ -40,11 +40,11 @@ Open 3 browser tabs → **Create game** in tab 1 → share the room code → **J
 | Q / A / Z / X | Remove pips from those channels |
 | Enter / Space | Start from menu |
 
-## Online multiplayer (v1)
+## Online multiplayer
 
 - Up to **3 players** per room with roles: Captain, Heavy Gunner, MG Gunner
-- **Movement is synced** across all clients via the game server
-- Ship systems (belts, machines, fuel) still run locally per client for now
+- **Server-authoritative** — one shared ship simulation runs on Render; all clients see the same fuel, hull, belts, machines, breaches, and bridge feed
+- Clients send movement + interact input; server broadcasts full world state ~20×/sec
 
 ## Deploy
 
