@@ -222,7 +222,7 @@ export class EngineeringScene extends Phaser.Scene {
       Math.abs(move.x - this.lastSentMove.x) > 0.01 ||
       Math.abs(move.y - this.lastSentMove.y) > 0.01;
     const now = performance.now();
-    const due = now - this.lastInputSentAt >= 50;
+    const due = now - this.lastInputSentAt >= 33;
 
     if (!interactChanged && !moveChanged && !due) return;
 
@@ -542,7 +542,7 @@ export class EngineeringScene extends Phaser.Scene {
     if (this.mp && this.worldSync) {
       if (!this.state.alive) return;
       this.sendNetworkInput();
-      this.player.update(dt, FLOOR);
+      this.player.pollInput();
       const move = this.player.getMoveInput();
       this.worldSync.predictLocal(
         this.mp.playerId,
@@ -551,16 +551,21 @@ export class EngineeringScene extends Phaser.Scene {
         dt,
         this.player.repairing,
       );
+      this.worldSync.extrapolateSim(dt);
+      const localPos = this.worldSync.getLocalPosition(this.mp.playerId);
+      if (localPos) {
+        this.player.sprite.setPosition(localPos.x, localPos.y);
+      }
       this.asteroidsView.update(dt);
       this.intercomUI.update(dt);
-      this.hud.update();
+      this.hud.update(dt);
       this.worldSync.updateCrew(dt, this.mp.playerId);
       this.updateCarryHighlights(this.worldSync.getLocalCarriedType());
       for (const m of this.machines) m.tickBrokenSparks(dt);
       this.animateOutBelts(dt);
       this.updatePrompt({
-        x: this.player.x,
-        y: this.player.y,
+        x: localPos?.x ?? this.player.x,
+        y: localPos?.y ?? this.player.y,
         carriedType: this.worldSync.getLocalCarriedType(),
         repairing: this.player.repairing,
         multiplayer: true,
@@ -580,7 +585,7 @@ export class EngineeringScene extends Phaser.Scene {
     this.intercom.update(dt);
     this.intercomUI.update(dt);
     this.damage.update(dt);
-    this.hud.update();
+    this.hud.update(dt);
 
     // Power → machines
     const fabOn = this.power.fabricatorsPowered();

@@ -44,7 +44,7 @@ Open 3 browser tabs → **Create game** in tab 1 → share the room code → **J
 
 - Up to **3 players** per room with roles: Captain, Heavy Gunner, MG Gunner
 - **Server-authoritative** — one shared ship simulation runs on your game server; all clients see the same fuel, hull, belts, machines, breaches, and bridge feed
-- Clients send movement + interact input (~20×/sec); server broadcasts world state at 20 Hz with WebSocket compression
+- Clients send movement + interact input (~30×/sec); server broadcasts world state at 30 Hz with WebSocket compression
 
 ## Deploy
 

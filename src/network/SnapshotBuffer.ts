@@ -1,7 +1,7 @@
 import type { WorldSnapshot } from './types';
 
 const MAX_BUFFER_MS = 400;
-const INTERP_DELAY_MS = 80;
+const INTERP_DELAY_MS = 66;
 
 interface PlayerFrame {
   time: number;

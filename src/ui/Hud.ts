@@ -11,6 +11,8 @@ export class Hud {
   private upgradeText: Phaser.GameObjects.Text;
   private hintText: Phaser.GameObjects.Text;
   private state: GameState;
+  private defaultHint: string;
+  private fuelEmptyAt = 0;
 
   constructor(scene: Phaser.Scene, state: GameState) {
     this.state = state;
@@ -62,8 +64,9 @@ export class Hud {
       })
       .setOrigin(0, 0.5);
 
+    this.defaultHint = 'Pick up → green DROP IN → orange TAKE OUT → right belts';
     this.hintText = scene.add
-      .text(0, 55, 'Pick up → green DROP IN → orange TAKE OUT → right belts', {
+      .text(0, 55, this.defaultHint, {
         fontFamily: 'Courier New, monospace',
         fontSize: '10px',
         color: '#88aa77',
@@ -87,11 +90,25 @@ export class Hud {
     this.container.setScrollFactor(0);
   }
 
-  update(): void {
+  update(dt = 0): void {
     const s = this.state;
     this.integrityBar.width = 120 * (s.integrity / s.maxIntegrity);
     this.integrityBar.setFillStyle(s.integrity < 30 ? 0xff4455 : s.integrity < 60 ? 0xffaa44 : 0x44ff88);
-    this.fuelBar.width = 120 * (s.fuel / s.maxFuel);
+    this.fuelBar.width = 120 * Math.max(0, s.fuel / s.maxFuel);
+
+    if (s.fuel <= 0) {
+      if (this.fuelEmptyAt === 0) this.fuelEmptyAt = performance.now();
+      const elapsed = (performance.now() - this.fuelEmptyAt) / 1000;
+      const remaining = Math.max(0, 8 - elapsed);
+      this.fuelBar.setFillStyle(remaining < 3 ? 0xff2244 : 0xff6644);
+      this.hintText.setText(`ENGINES STARVING — refuel or game over in ${Math.ceil(remaining)}s`);
+      this.hintText.setColor('#ff8866');
+    } else {
+      this.fuelEmptyAt = 0;
+      this.fuelBar.setFillStyle(0x44aaff);
+      this.hintText.setText(this.defaultHint);
+      this.hintText.setColor('#88aa77');
+    }
     this.statsText.setText(
       `SHELLS ${s.heavyShells}  AMMO ${s.ammoBoxes}\nWAVE ${s.wave}  SCORE ${s.score}`,
     );

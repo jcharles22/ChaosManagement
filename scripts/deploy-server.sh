@@ -17,6 +17,9 @@ cd server
 npm ci
 npm run build
 
+sudo cp "${REPO_DIR}/scripts/chaos-server.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+
 if systemctl is-active --quiet chaos-server; then
   sudo systemctl restart chaos-server
 else

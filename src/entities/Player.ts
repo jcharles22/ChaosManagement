@@ -90,8 +90,12 @@ export class Player {
     return { x: vx / len, y: vy / len };
   }
 
-  update(dt: number, bounds: Phaser.Geom.Rectangle): void {
+  pollInput(): void {
     this.interactPressed = Phaser.Input.Keyboard.JustDown(this.keys.interact);
+  }
+
+  update(dt: number, bounds: Phaser.Geom.Rectangle): void {
+    this.pollInput();
 
     const { x: vx, y: vy } = this.getMoveInput();
     const moveX = vx;

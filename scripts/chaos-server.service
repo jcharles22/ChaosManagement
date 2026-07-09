@@ -8,8 +8,8 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/ChaosManagement/server
 Environment=NODE_ENV=production
 Environment=PORT=3001
-Environment=TICK_HZ=20
-Environment=NODE_OPTIONS=--max-old-space-size=384
+Environment=TICK_HZ=30
+Environment=NODE_OPTIONS=--max-old-space-size=512
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=5

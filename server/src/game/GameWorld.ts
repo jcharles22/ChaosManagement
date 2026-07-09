@@ -344,10 +344,7 @@ export class GameWorld {
         .map((i) => ({ id: i.id, type: i.type, x: i.x, y: i.y })),
       asteroids: {
         ship: { ...this.sim.ship },
-        bodies:
-          this.tick % 3 === 0
-            ? this.sim.bodies.map((b) => ({ ...b }))
-            : [],
+        bodies: this.sim.bodies.map((b) => ({ ...b })),
       },
     };
 

@@ -48,7 +48,6 @@ export class WorldSync {
   private breaches = new Map<string, HullBreach>();
   private playerBuffer = new SnapshotBuffer();
   private lastTick = -1;
-  private lastAsteroidTick = -1;
   private beltBlockedCache = new Map<string, boolean>();
   private machineCache = new Map<string, string>();
   private localCarriedType: ItemType | null = null;
@@ -145,6 +144,23 @@ export class WorldSync {
     this.crew.get(localPlayerId)?.predictMove(mx, my, dt, repairing);
   }
 
+  /** Dead-reckon bridge feed between server snapshots (multiplayer). */
+  extrapolateSim(dt: number): void {
+    const ship = this.sim.ship;
+    ship.x += ship.vx * dt;
+    ship.y += ship.vy * dt;
+
+    for (const b of this.sim.bodies) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    }
+  }
+
+  getLocalPosition(localPlayerId: string): { x: number; y: number } | null {
+    const crew = this.crew.get(localPlayerId);
+    return crew ? { x: crew.x, y: crew.y } : null;
+  }
+
   updateCrew(dt: number, localPlayerId: string): void {
     const now = performance.now();
     for (const [id, crew] of this.crew) {
@@ -167,14 +183,9 @@ export class WorldSync {
     const newDemands = snapshot.ship.demands.length > this.lastDemandCount;
     this.lastDemandCount = snapshot.ship.demands.length;
 
-    // Asteroids — update when server sends body data (every 3rd tick)
-    if (snapshot.asteroids.bodies.length > 0) {
-      this.lastAsteroidTick = snapshot.tick;
-      this.sim.ship = { ...snapshot.asteroids.ship };
-      this.sim.bodies = snapshot.asteroids.bodies.map((b) => ({ ...b }));
-    } else {
-      this.sim.ship = { ...snapshot.asteroids.ship };
-    }
+    // Asteroids — full body list every server tick
+    this.sim.ship = { ...snapshot.asteroids.ship };
+    this.sim.bodies = snapshot.asteroids.bodies.map((b) => ({ ...b }));
 
     const liveIds = new Set<string>();
     this.beltItemsCache.clear();

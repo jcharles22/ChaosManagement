@@ -116,12 +116,12 @@ export class RemotePlayer {
     const dx = sx - this.sprite.x;
     const dy = sy - this.sprite.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 48) {
+    if (dist > 56) {
       this.sprite.x = sx;
       this.sprite.y = sy;
-    } else if (dist > 1.5) {
-      this.sprite.x += dx * 0.2;
-      this.sprite.y += dy * 0.2;
+    } else if (dist > 1) {
+      this.sprite.x += dx * 0.35;
+      this.sprite.y += dy * 0.35;
     }
   }
 

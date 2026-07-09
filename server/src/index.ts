@@ -4,7 +4,7 @@ import { Room } from './Room.js';
 import type { ClientMessage } from './types.js';
 
 const PORT = Number(process.env.PORT) || 3001;
-const TICK_HZ = Number(process.env.TICK_HZ) || 20;
+const TICK_HZ = Number(process.env.TICK_HZ) || 30;
 const TICK_MS = Math.round(1000 / TICK_HZ);
 const rooms = new Map<string, Room>();
 
