@@ -13,19 +13,29 @@ const ROLE_LABELS: Record<CrewRole, string> = {
   mg_gunner: 'MG Gunner',
 };
 
+const FLOOR = { left: 56, right: 1224, top: 216, bottom: 664 };
+const SPEED = 180;
+
 export class RemotePlayer {
   sprite: Phaser.GameObjects.Container;
   private body: Phaser.GameObjects.Rectangle;
   private nameText: Phaser.GameObjects.Text;
   private roleText: Phaser.GameObjects.Text;
   readonly id: string;
-  targetX: number;
-  targetY: number;
+  private isLocal: boolean;
+  private carriedCount = 0;
 
-  constructor(scene: Phaser.Scene, id: string, name: string, role: CrewRole, x: number, y: number) {
+  constructor(
+    scene: Phaser.Scene,
+    id: string,
+    name: string,
+    role: CrewRole,
+    x: number,
+    y: number,
+    isLocal = false,
+  ) {
     this.id = id;
-    this.targetX = x;
-    this.targetY = y;
+    this.isLocal = isLocal;
 
     const color = ROLE_COLORS[role];
     this.body = scene.add.rectangle(0, 0, 22, 28, color, 1);
@@ -56,7 +66,7 @@ export class RemotePlayer {
       this.nameText,
       this.roleText,
     ]);
-    this.sprite.setDepth(39);
+    this.sprite.setDepth(isLocal ? 41 : 39);
   }
 
   get x(): number {
@@ -67,15 +77,46 @@ export class RemotePlayer {
     return this.sprite.y;
   }
 
-  setTarget(x: number, y: number): void {
-    this.targetX = x;
-    this.targetY = y;
+  setCarriedCount(n: number): void {
+    this.carriedCount = n;
   }
 
-  update(dt: number): void {
-    const t = 1 - Math.exp(-12 * dt);
-    this.sprite.x += (this.targetX - this.sprite.x) * t;
-    this.sprite.y += (this.targetY - this.sprite.y) * t;
+  /** Immediate local movement — no waiting for server round-trip */
+  predictMove(mx: number, my: number, dt: number, repairing = false): void {
+    if (!this.isLocal || (mx === 0 && my === 0)) return;
+    const len = Math.hypot(mx, my) || 1;
+    const mult = repairing ? 0.35 : this.carriedCount > 0 ? 0.85 : 1;
+    this.sprite.x += (mx / len) * SPEED * mult * dt;
+    this.sprite.y += (my / len) * SPEED * mult * dt;
+    this.sprite.x = Phaser.Math.Clamp(this.sprite.x, FLOOR.left, FLOOR.right);
+    this.sprite.y = Phaser.Math.Clamp(this.sprite.y, FLOOR.top, FLOOR.bottom);
+  }
+
+  /** Soft correction when server disagrees with prediction */
+  reconcile(sx: number, sy: number): void {
+    const dx = sx - this.sprite.x;
+    const dy = sy - this.sprite.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 48) {
+      this.sprite.x = sx;
+      this.sprite.y = sy;
+    } else if (dist > 1.5) {
+      this.sprite.x += dx * 0.2;
+      this.sprite.y += dy * 0.2;
+    }
+  }
+
+  /** Remote players — smooth toward interpolated server position */
+  moveToward(x: number, y: number, dt: number): void {
+    if (this.isLocal) return;
+    const t = 1 - Math.exp(-20 * dt);
+    this.sprite.x += (x - this.sprite.x) * t;
+    this.sprite.y += (y - this.sprite.y) * t;
+  }
+
+  snapTo(x: number, y: number): void {
+    this.sprite.x = x;
+    this.sprite.y = y;
   }
 
   destroy(): void {

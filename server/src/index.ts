@@ -120,8 +120,8 @@ wss.on('connection', (ws) => {
 });
 
 setInterval(() => {
-  for (const room of rooms.values()) room.tick(1 / 20);
-}, 50);
+  for (const room of rooms.values()) room.tick(1 / 30);
+}, 33);
 
 server.listen(PORT, () => {
   console.log(`Chaos Management server listening on port ${PORT}`);

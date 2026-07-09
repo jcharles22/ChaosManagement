@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import type { GameState } from '../core/GameState';
+import type { ItemType } from '../core/types';
 import type { WorldSnapshot } from '../network/types';
+import { SnapshotBuffer } from './SnapshotBuffer';
 import { ItemEntity } from '../entities/Item';
 import { RemotePlayer } from '../entities/RemotePlayer';
 import { HullBreach } from '../entities/HullBreach';
@@ -39,6 +41,12 @@ export class WorldSync {
   private crew = new Map<string, RemotePlayer>();
   private items = new Map<string, ItemEntity>();
   private breaches = new Map<string, HullBreach>();
+  private playerBuffer = new SnapshotBuffer();
+  private lastTick = -1;
+  private lastAsteroidTick = -1;
+  private beltBlockedCache = new Map<string, boolean>();
+  private machineCache = new Map<string, string>();
+  private localCarriedType: ItemType | null = null;
 
   constructor(
     scene: Phaser.Scene,
@@ -56,23 +64,34 @@ export class WorldSync {
     this.storage = storage;
   }
 
-  apply(snapshot: WorldSnapshot, localPlayerId: string): void {
-    Object.assign(this.state, snapshot.ship);
-    this.state.pips = { ...snapshot.ship.pips };
-    this.state.demands = [...snapshot.ship.demands];
-    this.state.upgrades = [...snapshot.ship.upgrades];
+  onSnapshot(snapshot: WorldSnapshot, localPlayerId: string): void {
+    this.playerBuffer.push(snapshot);
 
-    this.sim.ship = { ...snapshot.asteroids.ship };
-    this.sim.bodies = snapshot.asteroids.bodies.map((b) => ({ ...b }));
+    if (snapshot.tick !== this.lastTick) {
+      this.lastTick = snapshot.tick;
+      this.applyWorldState(snapshot);
+    }
 
     for (const p of snapshot.players) {
       let crew = this.crew.get(p.id);
       if (!crew) {
-        crew = new RemotePlayer(this.scene, p.id, p.name, p.role, p.x, p.y);
+        crew = new RemotePlayer(
+          this.scene,
+          p.id,
+          p.name,
+          p.role,
+          p.x,
+          p.y,
+          p.id === localPlayerId,
+        );
         this.crew.set(p.id, crew);
       }
-      crew.setTarget(p.x, p.y);
-      crew.sprite.setDepth(p.id === localPlayerId ? 41 : 39);
+      crew.setCarriedCount(p.carried?.length ?? 0);
+      if (p.id === localPlayerId) {
+        this.localCarriedType =
+          p.carried && p.carried.length > 0 ? p.carried[p.carried.length - 1] : null;
+        crew.reconcile(p.x, p.y);
+      }
     }
 
     for (const id of [...this.crew.keys()]) {
@@ -81,14 +100,61 @@ export class WorldSync {
         this.crew.delete(id);
       }
     }
+  }
+
+  getLocalCarriedType(): ItemType | null {
+    return this.localCarriedType;
+  }
+
+  predictLocal(
+    localPlayerId: string,
+    mx: number,
+    my: number,
+    dt: number,
+    repairing: boolean,
+  ): void {
+    this.crew.get(localPlayerId)?.predictMove(mx, my, dt, repairing);
+  }
+
+  updateCrew(dt: number, localPlayerId: string): void {
+    const now = performance.now();
+    for (const [id, crew] of this.crew) {
+      if (id === localPlayerId) continue;
+      const pos = this.playerBuffer.getPosition(id, now);
+      if (pos) crew.moveToward(pos.x, pos.y, dt);
+    }
+  }
+
+  getCrew(id: string): RemotePlayer | undefined {
+    return this.crew.get(id);
+  }
+
+  private applyWorldState(snapshot: WorldSnapshot): void {
+    Object.assign(this.state, snapshot.ship);
+    this.state.pips = { ...snapshot.ship.pips };
+    this.state.demands = [...snapshot.ship.demands];
+    this.state.upgrades = [...snapshot.ship.upgrades];
+
+    // Asteroids — update when server sends body data (every other tick)
+    if (snapshot.asteroids.bodies.length > 0) {
+      this.lastAsteroidTick = snapshot.tick;
+      this.sim.ship = { ...snapshot.asteroids.ship };
+      this.sim.bodies = snapshot.asteroids.bodies.map((b) => ({ ...b }));
+    } else {
+      this.sim.ship = { ...snapshot.asteroids.ship };
+    }
 
     const liveIds = new Set<string>();
 
     for (const belt of snapshot.belts) {
       const beltEnt = this.belts[belt.id];
       if (beltEnt) {
-        beltEnt.blocked = belt.blocked;
-        beltEnt.draw();
+        const prev = this.beltBlockedCache.get(belt.id);
+        if (prev !== belt.blocked) {
+          beltEnt.blocked = belt.blocked;
+          beltEnt.draw();
+          this.beltBlockedCache.set(belt.id, belt.blocked);
+        }
       }
       const points = BELT_POINTS[belt.id] ?? [];
       for (const bi of belt.items) {
@@ -103,15 +169,15 @@ export class WorldSync {
       }
     }
 
-    for (const si of snapshot.storage.items) {
-      liveIds.add(si.id);
-    }
+    for (const si of snapshot.storage.items) liveIds.add(si.id);
     this.storage.setNetworkCount(snapshot.storage.items.length, snapshot.storage.capacity);
 
     for (const m of snapshot.machines) {
+      const key = `${m.broken}|${m.crafting}|${m.progress.toFixed(2)}|${m.powered}|${m.inputItems.length}|${m.outputItems.length}`;
+      if (this.machineCache.get(m.id) === key) continue;
+      this.machineCache.set(m.id, key);
       const machine = this.machines.find((x) => x.id === m.id);
-      if (!machine) continue;
-      machine.applyNetworkState({
+      machine?.applyNetworkState({
         broken: m.broken,
         crafting: m.crafting,
         progress: m.progress,
@@ -169,10 +235,6 @@ export class WorldSync {
     }
   }
 
-  updateCrew(dt: number): void {
-    for (const c of this.crew.values()) c.update(dt);
-  }
-
   destroy(): void {
     for (const c of this.crew.values()) c.destroy();
     this.crew.clear();
@@ -180,6 +242,7 @@ export class WorldSync {
     this.items.clear();
     for (const b of this.breaches.values()) b.sprite.destroy();
     this.breaches.clear();
+    this.playerBuffer.clear();
   }
 
   private ensureItem(id: string, type: import('../core/types').ItemType): ItemEntity {

@@ -192,7 +192,7 @@ export class EngineeringScene extends Phaser.Scene {
       if (msg.type === 'world' && msg.snapshot) {
         if (msg.snapshot.tick === this.lastSnapshotTick) return;
         this.lastSnapshotTick = msg.snapshot.tick;
-        this.worldSync!.apply(msg.snapshot, this.mp!.playerId);
+        this.worldSync!.onSnapshot(msg.snapshot, this.mp!.playerId);
         const me = msg.snapshot.players.find((p) => p.id === this.mp!.playerId);
         if (me?.powerConsoleOpen && !this.powerUI.visible) this.powerUI.open();
         if (!me?.powerConsoleOpen && this.powerUI.visible) this.powerUI.close();
@@ -527,10 +527,19 @@ export class EngineeringScene extends Phaser.Scene {
       if (!this.state.alive) return;
       this.sendNetworkInput();
       this.player.update(dt, FLOOR);
+      const move = this.player.getMoveInput();
+      this.worldSync.predictLocal(
+        this.mp.playerId,
+        move.x,
+        move.y,
+        dt,
+        this.player.repairing,
+      );
       this.asteroidsView.update(dt);
       this.intercomUI.update(dt);
       this.hud.update();
-      this.worldSync.updateCrew(dt);
+      this.worldSync.updateCrew(dt, this.mp.playerId);
+      this.updateCarryHighlights(this.worldSync.getLocalCarriedType());
       if (this.powerUI.visible) {
         this.handleNetworkPowerKeys();
       }
@@ -796,9 +805,9 @@ export class EngineeringScene extends Phaser.Scene {
     return false;
   }
 
-  private updateCarryHighlights(): void {
-    const carried = this.player.peek();
-    const type = carried?.type;
+  private updateCarryHighlights(carriedType?: ItemType | null): void {
+    const type =
+      carriedType !== undefined ? carriedType : (this.player.peek()?.type ?? null);
 
     for (const m of this.machines) {
       m.setInputHighlight(!!type && m.inputChest.canAccept(type));

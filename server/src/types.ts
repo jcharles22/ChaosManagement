@@ -44,6 +44,7 @@ export interface ShipStateNet {
 
 export interface WorldSnapshot {
   tick: number;
+  serverTime: number;
   ship: GameState;
   players: PlayerState[];
   belts: {

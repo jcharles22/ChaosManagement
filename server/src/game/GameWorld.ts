@@ -69,6 +69,7 @@ export interface PlayerNetState {
 
 export interface WorldSnapshot {
   tick: number;
+  serverTime: number;
   ship: GameState;
   players: PlayerNetState[];
   belts: BeltState[];
@@ -278,6 +279,7 @@ export class GameWorld {
   getSnapshot(): WorldSnapshot {
     const snap: WorldSnapshot = {
       tick: this.tick,
+      serverTime: Date.now(),
       ship: { ...this.state, pips: { ...this.state.pips }, demands: [...this.state.demands], upgrades: [...this.state.upgrades] },
       players: [...this.players.values()].map((p) => ({
         id: p.id,
@@ -307,7 +309,13 @@ export class GameWorld {
       floorItems: [...this.items.values()]
         .filter((i) => !i.onBelt && !i.carriedBy && !this.isInStorage(i.id) && !this.isInMachine(i.id))
         .map((i) => ({ id: i.id, type: i.type, x: i.x, y: i.y })),
-      asteroids: { ship: { ...this.sim.ship }, bodies: this.sim.bodies.map((b) => ({ ...b })) },
+      asteroids: {
+        ship: { ...this.sim.ship },
+        bodies:
+          this.tick % 2 === 0
+            ? this.sim.bodies.map((b) => ({ ...b }))
+            : [],
+      },
     };
 
     if (!this.state.alive) {
