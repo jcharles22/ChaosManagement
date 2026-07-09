@@ -27,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Open 3 browser tabs → **Create game** in tab 1 → share the room code → **Join** from tabs 2 and 3 → all **Ready up**.
+Open 2–3 browser tabs → **Create game** in tab 1 → share the room code → **Join** from other tabs → all **Ready up** (minimum 2 players).
 
 ## Controls
 
@@ -42,7 +42,7 @@ Open 3 browser tabs → **Create game** in tab 1 → share the room code → **J
 
 ## Online multiplayer
 
-- Up to **3 players** per room with roles: Captain, Heavy Gunner, MG Gunner
+- **2–3 players** per room with roles: Captain, Heavy Gunner, MG Gunner
 - **Server-authoritative** — one shared ship simulation runs on your game server; all clients see the same fuel, hull, belts, machines, breaches, and bridge feed
 - Clients send movement + interact input (~30×/sec); server broadcasts world state at 30 Hz with WebSocket compression
 

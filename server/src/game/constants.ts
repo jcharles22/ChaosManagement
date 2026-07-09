@@ -2,6 +2,8 @@ import type { ItemType, MachineId } from './gameTypes.js';
 
 export const FLOOR = { left: 56, right: 1224, top: 216, bottom: 664 };
 export const PLAYER_SPEED = 180;
+export const MIN_PLAYERS = 2;
+export const MAX_PLAYERS = 3;
 
 export const POWER_CONSOLE = { x: 160, y: 280 };
 export const UPGRADE_BAY = { x: 1100, y: 520 };

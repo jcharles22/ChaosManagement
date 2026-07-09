@@ -133,7 +133,7 @@ export class LobbyScene extends Phaser.Scene {
     backBtn.on('pointerdown', () => this.scene.start('Menu'));
     this.uiObjects.push(backBtn);
 
-    this.addText(width / 2, 560, 'Need 3 players online · ESC to go back', '#556677', 11);
+    this.addText(width / 2, 560, '2–3 players online · ESC to go back', '#556677', 11);
   }
 
   private showJoinForm(): void {
@@ -248,7 +248,7 @@ export class LobbyScene extends Phaser.Scene {
     this.addText(
       width / 2,
       520,
-      'Share the room code with 2 friends · All 3 must ready up',
+      'Invite 1–2 friends · Everyone must ready up',
       '#778899',
       12,
     );

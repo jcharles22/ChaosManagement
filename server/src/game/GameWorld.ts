@@ -13,6 +13,8 @@ import {
   BELTS,
   FLOOR,
   MACHINE_POSITIONS,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
   PLAYER_SPEED,
   POWER_CONSOLE,
   SPAWNS,
@@ -217,7 +219,12 @@ export class GameWorld {
   }
 
   allReady(): boolean {
-    return this.players.size === 3 && [...this.players.values()].every((p) => p.ready);
+    const count = this.players.size;
+    return (
+      count >= MIN_PLAYERS &&
+      count <= MAX_PLAYERS &&
+      [...this.players.values()].every((p) => p.ready)
+    );
   }
 
   start(): void {
@@ -233,7 +240,7 @@ export class GameWorld {
   }
 
   isFull(): boolean {
-    return this.players.size >= 3;
+    return this.players.size >= MAX_PLAYERS;
   }
 
   applyInput(
