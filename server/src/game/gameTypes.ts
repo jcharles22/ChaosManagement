@@ -137,3 +137,8 @@ export function freePips(state: GameState): number {
     state.pips.engines + state.pips.weapons + state.pips.shields + state.pips.fabricators;
   return state.totalPips - used;
 }
+
+export function healIntegrityFromBreach(breachSize: number): number {
+  const maxSize = 56;
+  return 8 + (breachSize / maxSize) * 12;
+}

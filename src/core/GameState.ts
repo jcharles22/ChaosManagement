@@ -70,3 +70,9 @@ export function allocatedPips(state: GameState): number {
 export function freePips(state: GameState): number {
   return state.totalPips - allocatedPips(state);
 }
+
+/** Hull integrity restored when a breach is fully sealed (scales with breach severity). */
+export function healIntegrityFromBreach(breachSize: number): number {
+  const maxSize = 56;
+  return 8 + (breachSize / maxSize) * 12;
+}

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { bus } from '../core/EventBus';
-import { createInitialState, type GameState } from '../core/GameState';
+import { createInitialState, healIntegrityFromBreach, type GameState } from '../core/GameState';
 import type { CrewRole, ItemType, MachineId, PowerChannel } from '../core/types';
 import { Player } from '../entities/Player';
 import { getSession, type MultiplayerSession } from '../network/GameClient';
@@ -643,8 +643,11 @@ export class EngineeringScene extends Phaser.Scene {
     if (p.interactHeld && (breach || broken)) {
       p.repairing = true;
       if (breach) {
+        const sizeBefore = breach.size;
         if (breach.repair(28 * dt)) {
-          this.showToast('Breach sealed!');
+          const heal = healIntegrityFromBreach(sizeBefore);
+          this.state.integrity = Math.min(this.state.maxIntegrity, this.state.integrity + heal);
+          this.showToast(`Breach sealed! +${Math.round(heal)} hull`);
           sfx.repair();
         }
       } else if (broken) {

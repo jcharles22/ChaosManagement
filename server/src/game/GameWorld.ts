@@ -1,6 +1,7 @@
 import type { CrewRole, ItemType, MachineId, PowerChannel } from './gameTypes.js';
 import {
   createInitialState,
+  healIntegrityFromBreach,
   type GameState,
   MACHINE_RECIPES,
 } from './gameTypes.js';
@@ -349,10 +350,13 @@ export class GameWorld {
     if (p.interactHeld && (breach || broken)) {
       p.repairing = true;
       if (breach) {
+        const sizeBefore = breach.size;
         breach.size -= 28 * dt;
         if (breach.size <= 8) {
+          const heal = healIntegrityFromBreach(sizeBefore);
+          this.state.integrity = Math.min(this.state.maxIntegrity, this.state.integrity + heal);
           this.breaches = this.breaches.filter((b) => b.id !== breach.id);
-          this.events.push('Breach sealed!');
+          this.events.push(`Breach sealed! +${Math.round(heal)} hull`);
         }
       } else if (broken) {
         broken.repairProgress += dt / 1.2;
